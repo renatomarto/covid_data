@@ -2,6 +2,7 @@ import pandas as pd
 import requests
 import mysql.connector
 import sys
+from datetime import datetime, timedelta
 
 # Verbinding maken met de database
 try:
@@ -14,11 +15,7 @@ try:
 except mysql.connector.Error as err:
     print(f"Er is een fout opgetreden bij het verbinden met de database: {err}")
     sys.exit()
-
-
-
-print("Starting download to csv file")
-# Download de csv
+ 
 url = "https://covid.ourworldindata.org/data/owid-covid-data.csv"
 try:
     response = requests.get(url)
@@ -40,19 +37,21 @@ df = df[df["iso_code"].isin(countries_to_keep)]
 # Vervang NaN-waarden in de kolommen "new_cases", "new_deaths" en "new_vaccinations" door 0
 df = df.fillna(value={"new_cases": 0, "new_deaths": 0, "new_vaccinations": 0})
 
-# Sla de gefilterde data op in een nieuw csv-bestand
-df.to_csv("owid-covid-data-filtered.csv", index=False)
-
-# lees de gegevens van het CSV-bestand
-covid_data = pd.read_csv("owid-covid-data-filtered.csv")
-
-print("Ending download to csv file")
-
 print("Database connection opened")
 
 # Aanmaken van de tabel om de data op te slaan
 mycursor = mydb.cursor()
+
 table_name = "covid_data"
+
+# Check if table exists
+mycursor.execute(f"SHOW TABLES LIKE '{table_name}'")
+result = mycursor.fetchone()
+
+if result:
+    # Truncate table if it exists
+    mycursor.execute(f"TRUNCATE TABLE {table_name}")
+
 create_table_query = f"CREATE TABLE IF NOT EXISTS {table_name} (id INT AUTO_INCREMENT PRIMARY KEY, location VARCHAR(255), date DATE, new_cases INT, new_deaths INT, new_vaccinations INT)"
 mycursor.execute(create_table_query)
 
@@ -61,12 +60,19 @@ insert_query = f"INSERT INTO {table_name} (location, date, new_cases, new_deaths
 data_to_insert = []
 
 # Itereren over de data en alleen de data van de vier landen selecteren
-for index, row in covid_data.iterrows():
+for index, row in df.iterrows():
     if row["iso_code"] in countries_to_keep:
         data_to_insert.append((row["location"], row["date"], row["new_cases"], row["new_deaths"], row["new_vaccinations"] if not pd.isna(row["new_vaccinations"]) else 0))
 
 # Invoegen van de data in de tabel
 mycursor.executemany(insert_query, data_to_insert)
+
+create_runtime_table_query = f"CREATE TABLE IF NOT EXISTS run_times (id INT AUTO_INCREMENT PRIMARY KEY,  run_time DATETIME )"
+insert_runtime_query = f"INSERT INTO run_times (run_time) VALUES (NOW())"
+mycursor.execute(create_runtime_table_query)
+mycursor.execute(insert_runtime_query)
+
+
 mydb.commit()
 
 # Sluiten van de database connectie
